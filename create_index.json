@@ -1,0 +1,33 @@
+{
+    "type": "message",
+    "settings": {
+        "persistent": {
+            "action.auto_create_index": "true"
+        }
+    },
+    "mappings": {
+        "message": {
+            "properties": {
+                "group_name": {
+                    "type": "keyword"
+                },
+                "room_name": {
+                    "type": "keyword"
+                },
+                "displayName": {
+                    "type": "text"
+                },
+                "username": {
+                    "type": "keyword"
+                },
+                "html": {
+                    "type": "text"
+                },
+                "sent": {
+                    "type": "date",
+                    "format": "date_optional_time"
+                }
+            }
+        }
+    }
+}
