@@ -1,22 +1,20 @@
 #!/usr/bin/env python3
 """
-Fetch gitter archives of all your public rooms
+Fetch gitter archives of all token bearer's public rooms
 """
-from datetime import datetime, timezone, timedelta
-from dateutil.parser import parse
+import yaml
 import json
 import pprint
 import os
 import time
 import uuid
-import tqdm
-
-
 import requests
 import requests_cache
-requests_cache.install_cache('gitter')
+from git import Repo
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import streaming_bulk
+from datetime import datetime, timezone, timedelta
+from dateutil.parser import parse
 
 client = Elasticsearch('http://localhost:9200')
 
@@ -24,8 +22,12 @@ with open('token') as f:
     token = f.read().strip()
 
 h = {'Authorization': 'Bearer %s' % token}
-archive_dir = 'archive'
 
+with open(r'config.yml') as file:
+    config = yaml.load(file, Loader=yaml.FullLoader)
+archive_dir = config['archivedir']
+archive_name = os.path.join(archive_dir, 'archive')
+requests_cache.install_cache(archive_dir + '/gitter_indexer') 
 def utcnow():
     return datetime.now(timezone.utc)
 
@@ -38,14 +40,14 @@ def gitter_api_request(path):
     if parse(r.headers['date']) + timedelta(minutes=10) > request_time:
         # if not a cached response, slow down:
         remaining = int(r.headers['X-RateLimit-Remaining'])
-        print("Requests remaining: %s" % remaining)
+        #print("Requests remaining: %s" % remaining)
         if remaining < 10:
             print("slowing down...")
             time.sleep(10)
         else:
             time.sleep(1)
-    else:
-        print("cached")
+    #else print("Request was cached")
+        
     return r.json()
 
 def create_index(client):
@@ -78,22 +80,21 @@ def extract_es_messages(messages):
             'content' : message['text'],
             'sent' : message['sent']
         }
-        print(es_message)
+        #print(es_message)
         yield es_message
 
 # Get list of indexes and check that the Gitter index exists.
 # If it does not, create it
 r = requests.get('http://localhost:9200/_aliases')
 r.raise_for_status()
-pp = pprint.PrettyPrinter(indent=4, width=80, compact=False)
-pp.pprint(r.json())
+##pp = pprint.PrettyPrinter(indent=4, width=80, compact=False)
+##pp.pprint(r.json())
 indexes = r.json().keys()
 if ( 'gitter-index' not in indexes):
     print('Creating index "gitter-index"')
     create_index(client)
 
 # Get the data from Gitter
-archive_name = 'archive'
 rooms = gitter_api_request('/rooms?_=%s' % uuid.uuid4().hex)
 
 for room in rooms:
@@ -127,25 +128,16 @@ for room in rooms:
     if room_messages:
         key='afterId'
         last_id = room_messages[-1]['id']
-        messages = gitter_api_request('/rooms/%s/chatMessages?afterId=%s&_=%s' % (
+        messages = gitter_api_request('/rooms/%s/chatMessages?limit=5000&afterId=%s&_=%s' % (
             room['id'], room_messages[-1]['id'], uuid.uuid4().hex))
     else:
         key='beforeId'
         try:
-            messages = gitter_api_request('/rooms/%s/chatMessages?limit=5000' % room['id'])
+            messages = gitter_api_request('/rooms/%s/chatMessages?limit=5000&' % room['id'])
         except Exception as e:
             print("Failed to get messages for %s: %s" % (name, e))
             continue
-
-    print('Indexing messages...')
-    number_of_docs = 0
-    progress = tqdm.tqdm(unit="docs", total=number_of_docs)
-    successes = 0
-    for ok, action in streaming_bulk( client=client, index='gitter-index', actions=extract_es_messages(messages)):
-        progress.update(1)
-        successes += ok
-    print('Indexed %d/%d messages' % (successes, number_of_docs))
-
+        
     while messages:
         if key == 'beforeId':
             room_messages[:0] = messages
@@ -153,14 +145,31 @@ for room in rooms:
         else:
             room_messages.extend(messages)
             edge_message = messages[-1]
-        print(len(room_messages))
-        print(edge_message['sent'], edge_message['text'].split('\n', 1)[0])
-        messages = gitter_api_request('/rooms/%s/chatMessages?%s=%s' % (
+        messages = gitter_api_request('/rooms/%s/chatMessages?limit=5000&%s=%s' % (
             room['id'], key, edge_message['id']))
-    
-    # Finally archive the messages
+        
+        if (len(messages) > 0):
+            num_messages = len(messages) 
+            successes = 0
+            for ok, action in streaming_bulk( client=client, index='gitter-index', actions=extract_es_messages(messages)):
+                successes += ok
+            print('Indexed %d/%d messages' % (successes, num_messages))
+            
+        print('Total messages for this room ' + str(len(room_messages)))
+        
+    print('Archiving messages...')
     with open(dest, 'w') as f:
         json.dump(room_messages, f, sort_keys=True, indent=1)
-
-    
+        
+now = datetime.now()
+dt_string = now.strftime("%d/%m/%Y %H:%M:%S")
+try:
+    repo = Repo(archive_dir)
+    repo.git.add(update=True)
+    repo.index.commit('Message index update ' + dt_string)
+    origin = repo.remote(name='origin')
+    origin.push()
+    print('\nSuccessfully pushed to backup archive')    
+except Exception as e:
+    print('Error while pushing to github: %s' % e)    
     
