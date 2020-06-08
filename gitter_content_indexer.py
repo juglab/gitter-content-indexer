@@ -4,7 +4,6 @@ Fetch gitter archives of all token bearer's public rooms
 """
 import yaml
 import json
-import pprint
 import os
 import time
 import uuid
@@ -87,8 +86,6 @@ def extract_es_messages(messages):
 # If it does not, create it
 r = requests.get('http://localhost:9200/_aliases')
 r.raise_for_status()
-##pp = pprint.PrettyPrinter(indent=4, width=80, compact=False)
-##pp.pprint(r.json())
 indexes = r.json().keys()
 if ( 'gitter-index' not in indexes):
     print('Creating index "gitter-index"')
