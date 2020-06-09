@@ -18,7 +18,7 @@ when run the first time)
 
 ## Requirements
 
-- Pythin 3.7
+- Python 3.7
 - requests
 - requests_cache
 - python-dateutil
