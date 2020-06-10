@@ -1,9 +1,7 @@
-archive
-archive-private
 *~
 *.pyc
 __pycache__
-gitter.sqlite
 .DS_Store
 token
 .pydevproject
+.project
