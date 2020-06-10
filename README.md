@@ -9,7 +9,7 @@ The will create the index  _gitter-index_  when run the first time.
 
 - If backup to Github is enabled, this user must also have permissions to push to the Github archive  backup repository.
 
-- In the  _config.yml_  file specify:
+- Copy  _config.sample.yml_  to  _config.yml_  and edit with your settings:
 
 ```yaml
 archive: True if want to push saved data to a git repo
