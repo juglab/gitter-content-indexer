@@ -5,3 +5,4 @@ __pycache__
 token
 .pydevproject
 .project
+config.yml
