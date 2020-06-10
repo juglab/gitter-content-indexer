@@ -26,3 +26,9 @@ when run the first time)
 - json
 - pyyaml
 - git
+
+## Credits
+
+This script is an extension of https://github.com/minrk/archive-gitter
+
+License: CC-0, Public Domain

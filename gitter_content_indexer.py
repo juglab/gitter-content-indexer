@@ -5,6 +5,7 @@ Fetch gitter archives of all token bearer's public rooms
 import yaml
 import json
 import os
+import sys
 import time
 import uuid
 import requests
@@ -61,7 +62,7 @@ def create_index(client):
                     "roomName": { "type": "keyword" },
                     "displayName": { "type": "text" },
                     "username": { "type": "keyword" },
-                    "content": { "type": "text" },
+                    "message": { "type": "text" },
                     "sent": { "type": "date", "format": "date_optional_time" },
                 }
             },
@@ -69,18 +70,27 @@ def create_index(client):
         ignore=400,
     )
 
-def extract_es_messages(messages):
+def extract_es_messages(indexed_messages, messages):
     for message in messages:
         es_message = { 
             'groupName' : group_name,
             'roomName' : room_name,
             'displayName' : message['fromUser']['displayName'],
             'username' : message['fromUser']['username'],
-            'content' : message['text'],
+            'message' : message['text'],
             'sent' : message['sent']
         }
-        #print(es_message)
+        indexed_messages.append(es_message)
         yield es_message
+        
+def index_messages(indexed_messages, messages):
+    num_messages = len(messages) 
+    successes = 0
+    for ok, action in streaming_bulk( client=client, index='gitter-index', actions=extract_es_messages(indexed_messages, messages)):
+        successes += ok
+    if (successes != num_messages):
+        print('Warning!: only %d/%d messages were indexed' % (successes, num_messages))
+    print('Processed ' + str(len(messages)) + ' messages')
 
 # Get list of indexes and check that the Gitter index exists.
 # If it does not, create it
@@ -109,6 +119,7 @@ for room in rooms:
     
     uri = room.get('uri', room['url'].lstrip('/'))
     dest = os.path.join(archive_name, uri + '.json')
+    es_dest = os.path.join(archive_name, uri + '_es.json')
     if '/' in dest:
         d = dest.rsplit('/', 1)[0]
         if not os.path.exists(d):
@@ -118,9 +129,12 @@ for room in rooms:
         print("Checking for new messages: %s" % dest)
         with open(dest) as f:
             room_messages = json.load(f)
+        with open(es_dest) as ff:
+            indexed_messages = json.load(ff)
     else:
         print("New room: %s" % dest)
         room_messages = []
+        indexed_messages = []
         
     if room_messages:
         key='afterId'
@@ -135,6 +149,8 @@ for room in rooms:
             print("Failed to get messages for %s: %s" % (name, e))
             continue
         
+    index_messages(indexed_messages, messages)
+    
     while messages:
         if key == 'beforeId':
             room_messages[:0] = messages
@@ -145,28 +161,39 @@ for room in rooms:
         messages = gitter_api_request('/rooms/%s/chatMessages?limit=5000&%s=%s' % (
             room['id'], key, edge_message['id']))
         
-        if (len(messages) > 0):
-            num_messages = len(messages) 
-            successes = 0
-            for ok, action in streaming_bulk( client=client, index='gitter-index', actions=extract_es_messages(messages)):
-                successes += ok
-            print('Indexed %d/%d messages' % (successes, num_messages))
+        index_messages(indexed_messages, messages)
             
-        print('Total messages for this room ' + str(len(room_messages)))
+    print('Total messages for this room ' + str(len(room_messages)))
+    
+    if (len(room_messages) != len(indexed_messages)):
+        print('Error!: no. of room messages != indexed messages')
+        sys.exit(1);
         
-    print('Archiving messages...')
+    print('Saving messages to disk ...')
     with open(dest, 'w') as f:
         json.dump(room_messages, f, sort_keys=True, indent=1)
+    with open(es_dest, 'w') as ff:
+        json.dump(indexed_messages, ff, sort_keys=False, indent=1)
         
-now = datetime.now()
-dt_string = now.strftime("%d/%m/%Y %H:%M:%S")
-try:
-    repo = Repo(archive_dir)
-    repo.git.add(update=True)
-    repo.index.commit('Message index update ' + dt_string)
-    origin = repo.remote(name='origin')
-    origin.push()
-    print('\nSuccessfully pushed to backup archive')    
-except Exception as e:
-    print('Error while pushing to github: %s' % e)    
+if (config['archive']):
+    print('Backing up messages...')
+    now = datetime.now()
+    dt_string = now.strftime("%d/%m/%Y %H:%M:%S")
+    try:
+        repo = Repo(archive_dir)
+        untracked = []
+        repo.untracked_files(untracked)
+        if (len(untracked) > 0):
+            repo.index.add(untracked)
+            repo.index.commit('Initial commit ' + dt_string)
+        
+        if (repo.isDirty()):
+            repo.index.add(update=True)
+            repo.index.commit('Message index update ' + dt_string)
+            
+        origin = repo.remote(name='origin')
+        origin.push()
+        print('\nSuccessfully pushed to backup archive')    
+    except Exception as e:
+        print('Error while backing up to github: %s' % e)    
     
