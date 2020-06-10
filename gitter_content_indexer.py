@@ -178,22 +178,21 @@ for room in rooms:
 if (config['archive']):
     print('Backing up messages...')
     now = datetime.now()
+    untracked = []
     dt_string = now.strftime("%d/%m/%Y %H:%M:%S")
     try:
         repo = Repo(archive_dir)
-        untracked = []
-        repo.untracked_files(untracked)
+        untracked = repo.untracked_files
         if (len(untracked) > 0):
             repo.index.add(untracked)
             repo.index.commit('Initial commit ' + dt_string)
         
-        if (repo.isDirty()):
-            repo.index.add(update=True)
-            repo.index.commit('Message index update ' + dt_string)
+        repo.git.add(all=True)
+        repo.index.commit('Message index update ' + dt_string)
             
         origin = repo.remote(name='origin')
         origin.push()
-        print('\nSuccessfully pushed to backup archive')    
+        print('\nSuccessfully pushed to backup Github repo')    
     except Exception as e:
         print('Error while backing up to github: %s' % e)    
     
