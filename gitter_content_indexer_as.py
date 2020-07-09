@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Fetch gitter archives of all token bearer's public rooms
+Fetch gitter archives of all token bearer's public rooms and uploads
+new entries to an instance of ElasticSearch's App Search
 """
 import yaml
 import json
@@ -11,12 +12,15 @@ import uuid
 import requests
 import requests_cache
 from git import Repo
-from elasticsearch import Elasticsearch
-from elasticsearch.helpers import streaming_bulk
+from elastic_app_search import Client
 from datetime import datetime, timezone, timedelta
 from dateutil.parser import parse
 
-client = Elasticsearch('http://localhost:9200')
+client = Client(
+    base_endpoint='localhost:3002/api/as/v1',
+    api_key='private-dwf2k2bdmawkiw265d78fc6z',
+    use_https=False
+)
 
 with open('token') as f:
     token = f.read().strip()
@@ -25,9 +29,13 @@ h = {'Authorization': 'Bearer %s' % token}
 
 with open(r'config.yml') as file:
     config = yaml.load(file, Loader=yaml.FullLoader)
+
+engine_name = config['index']
 archive_dir = config['archivedir']
 archive_name = os.path.join(archive_dir, 'archive')
+
 requests_cache.install_cache(archive_dir + '/gitter_indexer') 
+
 def utcnow():
     return datetime.now(timezone.utc)
 
@@ -40,66 +48,28 @@ def gitter_api_request(path):
     if parse(r.headers['date']) + timedelta(minutes=10) > request_time:
         # if not a cached response, slow down:
         remaining = int(r.headers['X-RateLimit-Remaining'])
-        #print("Requests remaining: %s" % remaining)
+        print('Requests remaining %s' % remaining)
         if remaining < 10:
-            print("slowing down...")
+            #print("slowing down...")
             time.sleep(10)
         else:
             time.sleep(1)
-    #else print("Request was cached")
-        
+    #else print('Request was cached')
     return r.json()
 
-def create_index(client):
-    """Creates an index in Elasticsearch if one isn't already there."""
-    client.indices.create(
-        index='gitter-index',
-        body={
-            "settings": {"number_of_shards": 1},
-            "mappings": {
-                "properties": {
-                    "groupName": { "type": "keyword" },
-                    "roomName": { "type": "keyword" },
-                    "displayName": { "type": "text" },
-                    "username": { "type": "keyword" },
-                    "message": { "type": "text" },
-                    "sent": { "type": "date", "format": "date_optional_time" },
-                }
-            },
-        },
-        ignore=400,
-    )
-
 def extract_es_messages(indexed_messages, messages):
+    num_messages = len(messages) 
     for message in messages:
         es_message = { 
-            'groupName' : group_name,
-            'roomName' : room_name,
-            'displayName' : message['fromUser']['displayName'],
+            'group_name' : group_name,
+            'room_name' : room_name,
+            'display_name' : message['fromUser']['displayName'],
             'username' : message['fromUser']['username'],
             'message' : message['text'],
             'sent' : message['sent']
         }
         indexed_messages.append(es_message)
-        yield es_message
-        
-def index_messages(indexed_messages, messages):
-    num_messages = len(messages) 
-    successes = 0
-    for ok, action in streaming_bulk( client=client, index='gitter-index', actions=extract_es_messages(indexed_messages, messages)):
-        successes += ok
-    if (successes != num_messages):
-        print('Warning!: only %d/%d messages were indexed' % (successes, num_messages))
-    print('Processed ' + str(len(messages)) + ' messages')
-
-# Get list of indexes and check that the Gitter index exists.
-# If it does not, create it
-r = requests.get('http://localhost:9200/_aliases')
-r.raise_for_status()
-indexes = r.json().keys()
-if ( 'gitter-index' not in indexes):
-    print('Creating index "gitter-index"')
-    create_index(client)
+    print('Extracted ' + str(len(messages)) + ' messages')
 
 # Get the data from Gitter
 rooms = gitter_api_request('/rooms?_=%s' % uuid.uuid4().hex)
@@ -126,13 +96,13 @@ for room in rooms:
             os.makedirs(d)
 
     if os.path.exists(dest):
-        print("Checking for new messages: %s" % dest)
+        print('Checking for new messages: %s' % dest)
         with open(dest) as f:
             room_messages = json.load(f)
         with open(es_dest) as ff:
             indexed_messages = json.load(ff)
     else:
-        print("New room: %s" % dest)
+        print('New room: %s' % dest)
         room_messages = []
         indexed_messages = []
         
@@ -146,10 +116,10 @@ for room in rooms:
         try:
             messages = gitter_api_request('/rooms/%s/chatMessages?limit=5000&' % room['id'])
         except Exception as e:
-            print("Failed to get messages for %s: %s" % (name, e))
+            print('Failed to get messages for %s: %s' % (name, e))
             continue
         
-    index_messages(indexed_messages, messages)
+    extract_es_messages(indexed_messages, messages)
     
     while messages:
         if key == 'beforeId':
@@ -161,13 +131,33 @@ for room in rooms:
         messages = gitter_api_request('/rooms/%s/chatMessages?limit=5000&%s=%s' % (
             room['id'], key, edge_message['id']))
         
-        index_messages(indexed_messages, messages)
-            
+        extract_es_messages(indexed_messages, messages)
+
     print('Total messages for this room ' + str(len(room_messages)))
-    
+
     if (len(room_messages) != len(indexed_messages)):
         print('Error!: no. of room messages != indexed messages')
         sys.exit(1);
+
+    print('Indexing documents ...')
+    tot = len(indexed_messages)
+    r = tot % 100
+    if (tot > 100):
+      ''' Can only index 100 documents at a time '''
+      step = 100
+      r = tot % 100
+      imax = tot//100
+      i = 1
+      #print('r ' + str(r) + ' , imax ' + str(imax))
+      while i <= imax:
+        client.index_documents(engine_name, indexed_messages[(i-1)*step:(i*step)-1])
+        print('Indexed %s documents' % str(step))
+        i = i+1
+      client.index_documents(engine_name, indexed_messages[imax*step:imax*step+r-1])
+      print('Indexed %s documents' % str(r))
+    else:
+        client.index_documents(engine_name, indexed_messages)
+        print('Indexed %s documents' % str(tot))
         
     print('Saving messages to disk ...')
     with open(dest, 'w') as f:
