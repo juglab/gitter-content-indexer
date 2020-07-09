@@ -145,7 +145,7 @@ for room in rooms:
         print('Error!: no. of room messages != new_es_messages')
         sys.exit(1);
 
-    print('Total room messages for this indexing run ' + str(len(messages)))
+    print('Total new room messages for this indexing run ' + str(len(new_messages)))
 
     print('Indexing documents ...')
     tot = len(new_es_messages)
