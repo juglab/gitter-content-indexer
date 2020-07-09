@@ -19,9 +19,11 @@ The "es" version  will create the index when run the first time .
 
 - If backup to Github is enabled, this user must also have permissions to push to the Github archive  backup repository.
 
-- Copy  _config.sample.yml_  to  _config.yml_  and edit with your settings:
+- Copy  _config.sample.yml_  to  _config.yml_  and edit with your settings (at this time the base_endpoint and api_key are not needed for the "es" version of the script):
 
 ```yaml
+base_endpoint: the base URL without the protocol
+api_key: obtained from the App Search web interface
 index: the name of the target index
 archive: True if want to push saved data to a git repo
 archivedir: path to where script will write data to

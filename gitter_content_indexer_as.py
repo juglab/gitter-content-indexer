@@ -16,25 +16,28 @@ from elastic_app_search import Client
 from datetime import datetime, timezone, timedelta
 from dateutil.parser import parse
 
+with open(r'config.yml') as file:
+    config = yaml.load(file, Loader=yaml.FullLoader)
+
 client = Client(
-    base_endpoint='localhost:3002/api/as/v1',
-    api_key='private-dwf2k2bdmawkiw265d78fc6z',
+    base_endpoint=config['base_endpoint'] + '/api/as/v1',
+    api_key=config['api_key'],
     use_https=False
 )
 
-with open('token') as f:
-    token = f.read().strip()
-
-h = {'Authorization': 'Bearer %s' % token}
-
-with open(r'config.yml') as file:
-    config = yaml.load(file, Loader=yaml.FullLoader)
+print(config['base_endpoint'] + '/api/as/v1')
+print(config['api_key'])
 
 engine_name = config['index']
 archive_dir = config['archivedir']
 archive_name = os.path.join(archive_dir, 'archive')
 
 requests_cache.install_cache(archive_dir + '/gitter_indexer') 
+
+with open('token') as f:
+    token = f.read().strip()
+
+h = {'Authorization': 'Bearer %s' % token}
 
 def utcnow():
     return datetime.now(timezone.utc)

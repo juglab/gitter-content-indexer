@@ -1,3 +1,6 @@
+# Note: the first 2 entries are not used by the "es" version
+base_endpoint: localhost:3002
+api_key: private_xxxxxxxxx
 index: my-index
 archive: False
 archivedir: /home/bob/gitter-messages
