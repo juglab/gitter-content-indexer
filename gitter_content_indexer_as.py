@@ -10,6 +10,7 @@ import sys
 import time
 import uuid
 import requests
+import urllib.parse
 import requests_cache
 from git import Repo
 from elastic_app_search import Client
@@ -25,7 +26,7 @@ client = Client(
     use_https=False
 )
 
-engine_name = config['index']
+engine_name = config['index_name']
 archive_dir = config['archivedir']
 archive_name = os.path.join(archive_dir, 'archive')
 
@@ -57,16 +58,30 @@ def gitter_api_request(path):
     #else print('Request was cached')
     return r.json()
 
+def linkifyId(group_name, room_name, gitterId):
+        link = "\<a href=\"https://gitter.im/"
+        if (group_name != 'None'):
+            link = link + group_name + "/"
+        link = link + room_name + "/" + gitterId + "\"\>" + gitterId + "\</a\>"
+        return link
+    
+def linkifyMessage(urls, message):
+    orig = message
+    for url in urls:
+        link = "<a href=\"" + url['url'] + "\">" + url['url'] + "</a>"
+        orig.replace(url['url'], link)
+    return orig
+      
 def extract_es_messages(es_messages, messages):
-    num_messages = len(messages) 
     for message in messages:
         es_message = { 
             'group_name' : group_name,
             'room_name' : room_name,
             'display_name' : message['fromUser']['displayName'],
             'username' : message['fromUser']['username'],
-            'message' : message['text'],
-            'sent' : message['sent']
+            'message' : linkifyMessage(message['urls'],message['text']),
+            'sent' : message['sent'],
+            'gitterid' : linkifyId(group_name, room_name, message['id'])
         }
         es_messages.append(es_message)
     print('Extracted ' + str(len(messages)) + ' messages')
@@ -147,25 +162,26 @@ for room in rooms:
 
     print('Total new room messages for this indexing run ' + str(len(new_messages)))
 
-    print('Indexing documents ...')
-    tot = len(new_es_messages)
-    r = tot % 100
-    if (tot > 100):
-      ''' Can only index 100 documents at a time '''
-      step = 100
-      r = tot % 100
-      imax = tot//100
-      i = 1
-      while i <= imax:
-        client.index_documents(engine_name, new_es_messages[(i-1)*step:(i*step)-1])
-        print('Indexed %s documents' % str(step))
-        i = i+1
-      client.index_documents(engine_name, new_es_messages[imax*step:imax*step+r-1])
-      print('Indexed %s documents' % str(r))
-    else:
-        client.index_documents(engine_name, new_es_messages)
-        print('Indexed %s documents' % str(tot))
-        
+    if (config['index']):
+        print('Indexing documents ...')
+        tot = len(new_es_messages)
+        r = tot % 100
+        if (tot > 100):
+            ''' Can only index 100 documents at a time '''
+            step = 100
+            r = tot % 100
+            imax = tot//100
+            i = 1
+            while i <= imax:
+                client.index_documents(engine_name, new_es_messages[(i-1)*step:(i*step)-1])
+                print('Indexed %s documents' % str(step))
+                i = i+1
+            client.index_documents(engine_name, new_es_messages[imax*step:imax*step+r-1])
+            print('Indexed %s documents' % str(r))
+        else:
+            client.index_documents(engine_name, new_es_messages)
+            print('Indexed %s documents' % str(tot))
+            
     print('Saving messages to disk ...')
     with open(dest, 'w') as f:
         json.dump(room_messages, f, sort_keys=True, indent=1)

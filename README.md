@@ -24,7 +24,8 @@ The "es" version  will create the index when run the first time .
 ```yaml
 base_endpoint: the base URL without the protocol
 api_key: obtained from the App Search web interface
-index: the name of the target index
+index_name: the name of the target index
+index: True if want to index the data
 archive: True if want to push saved data to a git repo
 archivedir: path to where script will write data to
 ```

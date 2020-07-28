@@ -28,8 +28,9 @@ with open(r'config.yml') as file:
     config = yaml.load(file, Loader=yaml.FullLoader)
 archive_dir = config['archivedir']
 archive_name = os.path.join(archive_dir, 'archive')
-index_name = config['index']
-requests_cache.install_cache(archive_dir + '/gitter_indexer') 
+index_name = config['index_name']
+requests_cache.install_cache(archive_dir + '/gitter_indexer')
+
 def utcnow():
     return datetime.now(timezone.utc)
 
@@ -52,7 +53,7 @@ def gitter_api_request(path):
         
     return r.json()
 
-def create_index(index_name,client):
+def create_index(client):
     """Creates an index in Elasticsearch if one isn't already there."""
     client.indices.create(
         index=index_name,
@@ -60,27 +61,35 @@ def create_index(index_name,client):
             "settings": {"number_of_shards": 1},
             "mappings": {
                 "properties": {
-                    "groupName": { "type": "keyword" },
-                    "roomName": { "type": "keyword" },
-                    "displayName": { "type": "text" },
+                    "group_name": { "type": "keyword" },
+                    "room_nameame": { "type": "keyword" },
+                    "display_name": { "type": "text" },
                     "username": { "type": "keyword" },
                     "message": { "type": "text" },
                     "sent": { "type": "date", "format": "date_optional_time" },
+                    "gitter_id": { "type": "text"}
                 }
             },
-        },
-        ignore=400,
+        }
     )
+    
+def linkifyId(group_name, room_name, gitterId):
+        link = 'https://gitter.im/' 
+        if (group_name != 'None'):
+            link = link + group_name + "/"
+        link = link + room_name + "/" + gitterId
+        return link
 
 def extract_es_messages(indexed_messages, messages):
     for message in messages:
         es_message = { 
-            'groupName' : group_name,
-            'roomName' : room_name,
-            'displayName' : message['fromUser']['displayName'],
+            'group_name' : group_name,
+            'room_name' : room_name,
+            'display_name' : message['fromUser']['displayName'],
             'username' : message['fromUser']['username'],
             'message' : message['text'],
-            'sent' : message['sent']
+            'sent' : message['sent'],
+            'gitter_id' : linkifyId(group_name, room_name, message['id'])
         }
         indexed_messages.append(es_message)
         yield es_message
@@ -88,7 +97,7 @@ def extract_es_messages(indexed_messages, messages):
 def index_messages(indexed_messages, messages):
     num_messages = len(messages) 
     successes = 0
-    for ok, action in streaming_bulk( client=client, index='gitter-index', actions=extract_es_messages(indexed_messages, messages)):
+    for ok, action in streaming_bulk( client=client, index=index_name, actions=extract_es_messages(indexed_messages, messages)):
         successes += ok
     if (successes != num_messages):
         print('Warning!: only %d/%d messages were indexed' % (successes, num_messages))
@@ -151,7 +160,8 @@ for room in rooms:
             print("Failed to get messages for %s: %s" % (name, e))
             continue
         
-    index_messages(indexed_messages, messages)
+    if (config['index']):
+        index_messages(indexed_messages, messages)
     
     while messages:
         if key == 'beforeId':
@@ -163,7 +173,8 @@ for room in rooms:
         messages = gitter_api_request('/rooms/%s/chatMessages?limit=5000&%s=%s' % (
             room['id'], key, edge_message['id']))
         
-        index_messages(indexed_messages, messages)
+        if (config['index']):
+            index_messages(indexed_messages, messages)
             
     print('Total messages for this room ' + str(len(room_messages)))
     
