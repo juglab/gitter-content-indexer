@@ -62,7 +62,7 @@ def linkifyId(group_name, room_name, gitterId):
         link = "https://gitter.im/"
         if (group_name != 'None'):
             link = link + group_name + "/"
-        link = link + room_name + "/" + gitterId
+        link = link + room_name + "?as=" + gitterId
         return link
       
 def extract_es_messages(es_messages, messages):
