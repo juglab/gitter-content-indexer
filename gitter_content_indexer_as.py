@@ -59,18 +59,11 @@ def gitter_api_request(path):
     return r.json()
 
 def linkifyId(group_name, room_name, gitterId):
-        link = "\<a href=\"https://gitter.im/"
+        link = "https://gitter.im/"
         if (group_name != 'None'):
             link = link + group_name + "/"
-        link = link + room_name + "/" + gitterId + "\"\>" + gitterId + "\</a\>"
+        link = link + room_name + "/" + gitterId
         return link
-    
-def linkifyMessage(urls, message):
-    orig = message
-    for url in urls:
-        link = "<a href=\"" + url['url'] + "\">" + url['url'] + "</a>"
-        orig.replace(url['url'], link)
-    return orig
       
 def extract_es_messages(es_messages, messages):
     for message in messages:
@@ -79,7 +72,7 @@ def extract_es_messages(es_messages, messages):
             'room_name' : room_name,
             'display_name' : message['fromUser']['displayName'],
             'username' : message['fromUser']['username'],
-            'message' : linkifyMessage(message['urls'],message['text']),
+            'message' : message['text'],
             'sent' : message['sent'],
             'gitterid' : linkifyId(group_name, room_name, message['id'])
         }
